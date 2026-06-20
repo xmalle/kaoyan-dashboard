@@ -290,14 +290,30 @@
     margin-bottom: 12px;
   }
   .wk-day{
+    width: auto;
     padding: 10px 6px;
     border-radius: 10px;
     text-align: center;
     cursor: pointer;
     border: 1px solid var(--border);
+    background: var(--bubble-0);
     transition: transform .15s ease, box-shadow .15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: center;
+    min-height: 74px;
+    justify-content: center;
   }
-  .wk-day:hover{ transform: translateY(-2px); box-shadow: 0 3px 10px rgba(31,47,61,0.08); }
+  .wk-day.lvl-1{background:var(--bubble-1);border-color:var(--bubble-1);}
+  .wk-day.lvl-2{background:var(--bubble-2);border-color:var(--bubble-2);}
+  .wk-day.lvl-3{background:var(--bubble-3);border-color:var(--bubble-3);color:#fff;}
+  .wk-day.lvl-3 .wk-day-w, .wk-day.lvl-3 .wk-day-d, .wk-day.lvl-3 .wk-day-h{color:#fff;}
+  .wk-day.lvl-4{background:var(--bubble-4);border-color:var(--bubble-4);color:#fff;}
+  .wk-day.lvl-4 .wk-day-w, .wk-day.lvl-4 .wk-day-d, .wk-day.lvl-4 .wk-day-h{color:#fff;}
+  .wk-day.lvl-5{background:var(--bubble-5);border-color:var(--bubble-5);color:#fff;}
+  .wk-day.lvl-5 .wk-day-w, .wk-day.lvl-5 .wk-day-d, .wk-day.lvl-5 .wk-day-h{color:#fff;}
+  .wk-day:hover{ transform: translateY(-2px); box-shadow: 0 3px 10px rgba(31,47,61,0.12); }
   .wk-day-w{ font-size: 11px; color: var(--ink-light); font-family:'IBM Plex Mono', monospace; }
   .wk-day-d{ font-size: 18px; font-weight: 700; margin: 4px 0 2px; color: var(--ink); font-family:'Noto Serif SC', serif; }
   .wk-day-h{ font-size: 11px; color: var(--ink-light); font-family:'IBM Plex Mono', monospace; }
@@ -599,7 +615,7 @@ function renderWeeklySection(){
     const lvl = levelForHours(sum);
     const weekdayShort = ['日','一','二','三','四','五','六'][d.getDay()];
     dayGrid += `
-      <div class="wk-day cell lvl-${lvl}" data-action="open-day" data-date="${ds}" title="${chineseMD(ds)} · ${sum.toFixed(1)} h">
+      <div class="wk-day lvl-${lvl}" data-action="open-day" data-date="${ds}" title="${chineseMD(ds)} · ${sum.toFixed(1)} h">
         <div class="wk-day-w">${weekdayShort}</div>
         <div class="wk-day-d">${d.getDate()}</div>
         <div class="wk-day-h">${sum>0 ? sum.toFixed(1)+'h' : '—'}</div>
