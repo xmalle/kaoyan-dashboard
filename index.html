@@ -226,6 +226,100 @@
   }
   .flash.show{ opacity:1; transform:translateX(-50%) translateY(0); }
   .flash.warn{ background:#B8472F; }
+
+  .wk-grid2{
+    display:grid;
+    grid-template-columns: 1fr 1.2fr;
+    gap: 16px;
+    margin-bottom: 14px;
+  }
+  .wk-stats{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .wk-subjects{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .wk-subjects-title{
+    font-size: 13px;
+    color: var(--ink-light);
+    margin-bottom: 2px;
+  }
+  .wk-subj-row{
+    display:grid;
+    grid-template-columns: 68px 1fr 88px;
+    gap: 10px;
+    align-items: center;
+    font-size: 13px;
+  }
+  .wk-subj-label{ color: var(--ink); }
+  .wk-subj-bar{
+    height: 8px;
+    background: rgba(31,47,61,0.08);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .wk-subj-bar > div{
+    height: 100%;
+    background: var(--bubble-4);
+    border-radius: 4px;
+  }
+  .wk-subj-val{
+    text-align: right;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--ink-light);
+    font-size: 12px;
+  }
+  .wk-summary-block{
+    padding: 14px 16px;
+    background: var(--stamp-soft);
+    border: 1px dashed var(--stamp);
+    border-radius: var(--radius);
+    margin-bottom: 14px;
+  }
+  .wk-comment{ font-weight: 600; color: var(--stamp); font-size: 14px; }
+  .wk-comment-extra{ font-size: 12.5px; color: var(--ink-light); margin-top: 6px; }
+
+  .wk-daygrid{
+    display:grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .wk-day{
+    padding: 10px 6px;
+    border-radius: 10px;
+    text-align: center;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .wk-day:hover{ transform: translateY(-2px); box-shadow: 0 3px 10px rgba(31,47,61,0.08); }
+  .wk-day-w{ font-size: 11px; color: var(--ink-light); font-family:'IBM Plex Mono', monospace; }
+  .wk-day-d{ font-size: 18px; font-weight: 700; margin: 4px 0 2px; color: var(--ink); font-family:'Noto Serif SC', serif; }
+  .wk-day-h{ font-size: 11px; color: var(--ink-light); font-family:'IBM Plex Mono', monospace; }
+
+  .wk-notes{
+    border-top: 1px dashed var(--border);
+    padding-top: 12px;
+    margin-top: 4px;
+  }
+  .wk-notes-title{ font-size: 12.5px; color: var(--ink-light); margin-bottom: 8px; }
+  .wk-note{
+    font-size: 13px;
+    padding: 6px 0;
+    border-bottom: 1px dashed rgba(31,47,61,0.08);
+    line-height: 1.5;
+  }
+  .wk-note .mono{ color: var(--stamp); margin-right: 8px; }
+
+  @media (max-width: 720px){
+    .wk-grid2{ grid-template-columns: 1fr; }
+    .wk-subj-row{ grid-template-columns: 56px 1fr 72px; }
+  }
 }
 </style>
 </head>
@@ -249,6 +343,7 @@ const WEEKDAY_FULL = ['日','一','二','三','四','五','六'];
 let config = null;          // {examDate, examLabel, milestones:[{id,title,date,progress}], keyDates:[{id,title,date}]}
 let heatmap = {};           // {'YYYY-MM-DD': {subjects:{key:hours}, note:''}}
 let viewYear = new Date().getFullYear();
+let weekOffset = 0;
 let pendingResetStep = false;
 let draftConfig = null;       // working copy used while settings modal is open; discarded on cancel
 
@@ -391,6 +486,181 @@ function computeStats(){
   }
   return {totalDays, totalHours, avg, longest, current};
 }
+
+/* ============ weekly summary ============ */
+function getWeekSummary(offset){
+  const today = parseYMD(todayStr());
+  const dow = (today.getDay() + 6) % 7;    // Mon=0..Sun=6
+  const monday = addDays(today, -dow);
+  const weekStart = addDays(monday, offset * 7);
+  const weekEnd = addDays(weekStart, 6);
+
+  let totalHours = 0;
+  let activeDays = 0;
+  const subjHours = {};
+  let best = {date:null, hours:0};
+  let noteList = [];
+
+  for(let i = 0; i < 7; i++){
+    const d = addDays(weekStart, i);
+    const ds = fmtYMD(d);
+    const e = heatmap[ds];
+    if(e){
+      let daySum = 0;
+      if(e.subjects){
+        for(const k in e.subjects){
+          const h = Number(e.subjects[k])||0;
+          daySum += h;
+          subjHours[k] = (subjHours[k]||0) + h;
+        }
+      }
+      totalHours += daySum;
+      if(daySum > 0){
+        activeDays += 1;
+        if(daySum > best.hours){ best = {date:ds, hours:daySum}; }
+      }
+      if(e.note && e.note.trim()) noteList.push({date:ds, note:e.note});
+    }
+  }
+
+  // 与上周对比
+  const last = getWeekSummaryRaw(offset - 1);
+  const diff = totalHours - last.totalHours;
+
+  let comment;
+  if(activeDays === 0){ comment = '这一周还没有学习记录,下周加油!'; }
+  else if(totalHours < 15){ comment = '刚起步,先把每天的学习习惯稳住。'; }
+  else if(totalHours < 30){ comment = '节奏不错,继续保持这个势头。'; }
+  else if(totalHours < 45){ comment = '高强度周,注意劳逸结合,别倦怠。'; }
+  else { comment = '冲刺级投入量!记得安排复盘日消化内容。'; }
+
+  let topSubject = null;
+  for(const k in subjHours){
+    if(!topSubject || subjHours[k] > subjHours[topSubject]) topSubject = k;
+  }
+
+  return {
+    start: fmtYMD(weekStart),
+    end: fmtYMD(weekEnd),
+    startLabel: chineseMD(fmtYMD(weekStart)),
+    endLabel: chineseMD(fmtYMD(weekEnd)),
+    totalHours, activeDays,
+    avgHours: activeDays ? totalHours/activeDays : 0,
+    subjHours, best, topSubject, comment, noteList,
+    diffHours: diff
+  };
+}
+// 轻量版(用于计算上周对比,避免递归调用自身)
+function getWeekSummaryRaw(offset){
+  const today = parseYMD(todayStr());
+  const dow = (today.getDay() + 6) % 7;
+  const monday = addDays(today, -dow);
+  const weekStart = addDays(monday, offset * 7);
+  let totalHours = 0;
+  for(let i = 0; i < 7; i++){
+    const ds = fmtYMD(addDays(weekStart, i));
+    const e = heatmap[ds];
+    if(e && e.subjects){
+      for(const k in e.subjects) totalHours += Number(e.subjects[k])||0;
+    }
+  }
+  return {totalHours};
+}
+
+function renderWeeklySection(){
+  const cur = getWeekSummary(weekOffset);
+  const diff = cur.diffHours;
+  let diffText;
+  if(diff === 0) diffText = '与上周持平';
+  else if(diff > 0) diffText = `比上周多 ${diff.toFixed(1)} h`;
+  else diffText = `比上周少 ${Math.abs(diff).toFixed(1)} h`;
+
+  const subjHtml = SUBJECTS.map(s => {
+    const h = cur.subjHours[s.key] || 0;
+    const pct = cur.totalHours ? Math.round(h*100/cur.totalHours) : 0;
+    return `
+      <div class="wk-subj-row">
+        <span class="wk-subj-label">${s.label}</span>
+        <div class="wk-subj-bar"><div style="width:${pct}%"></div></div>
+        <span class="wk-subj-val">${h.toFixed(1)} h · ${pct}%</span>
+      </div>`;
+  }).join('');
+
+  const s = parseYMD(cur.start);
+  let dayGrid = '<div class="wk-daygrid">';
+  for(let i = 0; i < 7; i++){
+    const d = addDays(s, i);
+    const ds = fmtYMD(d);
+    const e = heatmap[ds];
+    let sum = 0;
+    if(e && e.subjects){
+      for(const k in e.subjects) sum += Number(e.subjects[k])||0;
+    }
+    const lvl = levelForHours(sum);
+    const weekdayShort = ['日','一','二','三','四','五','六'][d.getDay()];
+    dayGrid += `
+      <div class="wk-day cell lvl-${lvl}" data-action="open-day" data-date="${ds}" title="${chineseMD(ds)} · ${sum.toFixed(1)} h">
+        <div class="wk-day-w">${weekdayShort}</div>
+        <div class="wk-day-d">${d.getDate()}</div>
+        <div class="wk-day-h">${sum>0 ? sum.toFixed(1)+'h' : '—'}</div>
+      </div>`;
+  }
+  dayGrid += '</div>';
+
+  const bestLabel = cur.best.date ? `${chineseMD(cur.best.date)} · ${cur.best.hours.toFixed(1)} h` : '—';
+  const topSubjLabel = cur.topSubject
+    ? (SUBJECTS.find(x=>x.key===cur.topSubject)||{}).label || cur.topSubject
+    : '—';
+
+  const notesHtml = cur.noteList.length
+    ? '<div class="wk-notes"><div class="wk-notes-title">本周备注</div>' +
+        cur.noteList.map(n=>`<div class="wk-note"><span class="mono">${chineseMD(n.date)}</span> ${escapeHtml(n.note)}</div>`).join('') +
+        '</div>'
+    : '';
+
+  const emptyHint = cur.activeDays === 0
+    ? '<div class="empty-hint">这一周还没有记录 · 点格子可以补录</div>'
+    : '';
+
+  return `
+    <div class="section">
+      <div class="section-head">
+        <div>
+          <div class="section-title">每周总结</div>
+          <div class="section-caption">${cur.startLabel} ~ ${cur.endLabel} · ${diffText}</div>
+        </div>
+        <div class="year-nav">
+          <button data-action="prev-week">‹ 上周</button>
+          <button data-action="this-week">本周</button>
+          <button data-action="next-week">下周 ›</button>
+        </div>
+      </div>
+
+      <div class="wk-grid2">
+        <div class="wk-stats">
+          <div class="stat-chip"><div class="num">${cur.totalHours.toFixed(1)}</div><div class="lbl">本周总时长(h)</div></div>
+          <div class="stat-chip"><div class="num">${cur.activeDays}</div><div class="lbl">打卡天数</div></div>
+          <div class="stat-chip"><div class="num">${cur.avgHours.toFixed(1)}</div><div class="lbl">日均·打卡日</div></div>
+          <div class="stat-chip"><div class="num">${topSubjLabel}</div><div class="lbl">最投入科目</div></div>
+        </div>
+        <div class="wk-subjects">
+          <div class="wk-subjects-title">各科目时长占比</div>
+          ${subjHtml}
+        </div>
+      </div>
+
+      <div class="wk-summary-block">
+        <div class="wk-comment">📌 ${cur.comment}</div>
+        <div class="wk-comment-extra">最投入的一天:<span class="mono">${bestLabel}</span></div>
+      </div>
+
+      ${emptyHint}
+      ${dayGrid}
+      ${notesHtml}
+    </div>
+  `;
+}
+
 function currentMilestone(){
   if(!config.milestones || !config.milestones.length) return null;
   const today = todayStr();
@@ -460,6 +730,7 @@ function renderDashboard(){
     ${renderHero()}
     ${renderMilestonesSection()}
     ${renderKeyDatesSection()}
+    ${renderWeeklySection()}
     ${renderHeatmapSection()}
   `;
 }
@@ -950,6 +1221,10 @@ function handleClick(e){
 
   if(action === 'prev-year'){ viewYear -= 1; render(); return; }
   if(action === 'next-year'){ viewYear += 1; render(); return; }
+
+  if(action === 'prev-week'){ weekOffset -= 1; render(); return; }
+  if(action === 'next-week'){ weekOffset += 1; render(); return; }
+  if(action === 'this-week'){ weekOffset = 0; render(); return; }
 
   if(action === 'log-today'){ openModal(renderDayModal(todayStr())); return; }
   if(action === 'open-day'){ openModal(renderDayModal(el.dataset.date)); return; }
