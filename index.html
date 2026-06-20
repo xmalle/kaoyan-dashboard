@@ -216,6 +216,17 @@
   @media (prefers-reduced-motion:reduce){
     *{transition:none !important;}
   }
+
+  .flash{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(8px);
+    background:#1F2F3D; color:#fff; padding:10px 20px; border-radius:999px;
+    font-size:13px; opacity:0; transition:opacity .25s ease, transform .25s ease;
+    pointer-events:none; z-index:100; box-shadow:0 4px 18px rgba(0,0,0,0.18);
+    white-space:nowrap;
+  }
+  .flash.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .flash.warn{ background:#B8472F; }
+}
 </style>
 </head>
 <body>
@@ -273,28 +284,73 @@ function chineseFull(s){
   return d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日';
 }
 
-/* ============ storage (localStorage) ============ */
-function loadConfig(){
+/* ============ storage (localStorage + sessionStorage + memory fallback) ============ */
+const LS_CONFIG_KEY = 'kaoyan.config.v1';
+const LS_HEATMAP_KEY = 'kaoyan.heatmap.v1';
+const memoryFallback = {config:null, heatmap:null};
+
+function storageWrite(storage, key, value){
   try{
-    const v = localStorage.getItem('kaoyan.config');
-    return v ? JSON.parse(v) : null;
-  }catch(e){ return null; }
+    if(value === null) storage.removeItem(key);
+    else storage.setItem(key, value);
+    return true;
+  }catch(e){ return false; }
 }
-function saveConfig(){
-  try{
-    localStorage.setItem('kaoyan.config', JSON.stringify(config));
-  }catch(e){ console.error('save config failed', e); }
+function storageRead(storage, key){
+  try{ return storage.getItem(key); }catch(e){ return null; }
+}
+function storageClear(storage, key){
+  try{ storage.removeItem(key); return true; }catch(e){ return false; }
+}
+
+function loadConfig(){
+  for(const s of [localStorage, sessionStorage]){
+    const v = storageRead(s, LS_CONFIG_KEY);
+    if(v){ try{ return JSON.parse(v); }catch(e){} }
+  }
+  return memoryFallback.config;
+}
+function saveConfig(quiet){
+  if(!config) return;
+  const data = JSON.stringify(config);
+  let ok = false;
+  for(const s of [localStorage, sessionStorage]){
+    if(storageWrite(s, LS_CONFIG_KEY, data)) ok = true;
+  }
+  memoryFallback.config = config;
+  if(quiet !== true){ ok ? flash('已保存 ✓') : flash('浏览器存储受限,刷新后数据可能丢失', true); }
 }
 function loadHeatmap(){
-  try{
-    const v = localStorage.getItem('kaoyan.heatmap');
-    return v ? JSON.parse(v) : {};
-  }catch(e){ return {}; }
+  for(const s of [localStorage, sessionStorage]){
+    const v = storageRead(s, LS_HEATMAP_KEY);
+    if(v){ try{ return JSON.parse(v); }catch(e){} }
+  }
+  return memoryFallback.heatmap || {};
 }
-function saveHeatmap(){
-  try{
-    localStorage.setItem('kaoyan.heatmap', JSON.stringify(heatmap));
-  }catch(e){ console.error('save heatmap failed', e); }
+function saveHeatmap(quiet){
+  const data = JSON.stringify(heatmap);
+  let ok = false;
+  for(const s of [localStorage, sessionStorage]){
+    if(storageWrite(s, LS_HEATMAP_KEY, data)) ok = true;
+  }
+  memoryFallback.heatmap = heatmap;
+  if(quiet !== true){ ok ? flash('已保存 ✓') : flash('浏览器存储受限,刷新后数据可能丢失', true); }
+}
+
+let _flashTimer;
+function flash(msg, warn){
+  let el = document.getElementById('flash-toast');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'flash-toast';
+    el.className = 'flash';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.toggle('warn', !!warn);
+  el.classList.add('show');
+  clearTimeout(_flashTimer);
+  _flashTimer = setTimeout(()=> el.classList.remove('show'), 1800);
 }
 
 /* ============ derived data ============ */
@@ -349,6 +405,13 @@ function currentMilestone(){
 function init(){
   config = loadConfig();
   heatmap = loadHeatmap();
+  // 页面隐藏或关闭时,额外把数据刷一遍到存储
+  function autosave(){
+    if(config) storageWrite(localStorage, LS_CONFIG_KEY, JSON.stringify(config));
+    storageWrite(localStorage, LS_HEATMAP_KEY, JSON.stringify(heatmap));
+  }
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState==='hidden') autosave(); });
+  window.addEventListener('pagehide', autosave);
   render();
 }
 
@@ -680,6 +743,8 @@ function renderSettingsModal(){
 
         <div class="modal-foot">
           <div class="spacer"></div>
+          <button class="btn btn-ghost btn-sm" data-action="export-data">导出数据</button>
+          <button class="btn btn-ghost btn-sm" data-action="import-data">导入数据</button>
           <button class="btn btn-ghost btn-sm" data-action="close-modal">取消</button>
           <button class="btn btn-stamp btn-sm" data-action="save-settings">保存</button>
         </div>
@@ -829,11 +894,57 @@ function handleClick(e){
     return;
   }
   if(action === 'confirm-reset'){
-    try{ localStorage.removeItem('kaoyan.config'); }catch(e){}
-    try{ localStorage.removeItem('kaoyan.heatmap'); }catch(e){}
+    for(const s of [localStorage, sessionStorage]){ storageClear(s, LS_CONFIG_KEY); storageClear(s, LS_HEATMAP_KEY); }
     config = null; heatmap = {}; pendingResetStep = false;
     closeModal();
     render();
+    flash('已清空全部数据');
+    return;
+  }
+
+  if(action === 'export-data'){
+    const payload = {
+      version:1, exportedAt: new Date().toISOString(),
+      config: config || null,
+      heatmap: heatmap || {}
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kaoyan-backup-${todayStr()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 100);
+    flash('已导出到下载目录');
+    return;
+  }
+  if(action === 'import-data'){
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = (ev) => {
+      const file = ev.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try{
+          const data = JSON.parse(e.target.result);
+          if(!data || typeof data !== 'object') throw new Error('格式不正确');
+          if(data.config) config = data.config;
+          if(data.heatmap && typeof data.heatmap === 'object') heatmap = data.heatmap;
+          saveConfig(true); saveHeatmap(true);
+          closeModal();
+          render();
+          flash('导入成功 ✓');
+        }catch(err){
+          flash('导入失败:' + err.message, true);
+        }
+      };
+      reader.onerror = () => flash('读取文件失败', true);
+      reader.readAsText(file);
+    };
+    input.click();
     return;
   }
 
