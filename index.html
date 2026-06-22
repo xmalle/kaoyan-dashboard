@@ -317,6 +317,36 @@
   .wk-day-w{ font-size: 11px; color: var(--ink-light); font-family:'IBM Plex Mono', monospace; }
   .wk-day-d{ font-size: 18px; font-weight: 700; margin: 4px 0 2px; color: var(--ink); font-family:'Noto Serif SC', serif; }
   .wk-day-h{ font-size: 11px; color: var(--ink-light); font-family:'IBM Plex Mono', monospace; }
+  .wk-day-mood{ font-size: 16px; line-height: 1; min-height: 18px; }
+
+  .mood-row{
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+  .mood-btn{
+    width: 44px; height: 44px;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    background: var(--paper);
+    font-size: 22px;
+    cursor: pointer;
+    transition: border-color .15s, transform .1s, background .15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .mood-btn:hover{
+    border-color: var(--ink-light);
+    transform: scale(1.08);
+  }
+  .mood-btn.active{
+    border-color: var(--stamp);
+    background: var(--stamp-soft);
+    transform: scale(1.1);
+  }
 
   .wk-notes{
     border-top: 1px dashed var(--border);
@@ -354,6 +384,14 @@ const SUBJECTS = [
   {key:'other', label:'其他'},
 ];
 const WEEKDAY_FULL = ['日','一','二','三','四','五','六'];
+const MOODS = [
+  {emoji:'😊', label:'状态好'},
+  {emoji:'😐', label:'一般'},
+  {emoji:'😤', label:'有压力'},
+  {emoji:'😴', label:'疲惫'},
+  {emoji:'🔥', label:'冲劲足'},
+  {emoji:'🤯', label:'崩溃'},
+];
 
 /* ============ state ============ */
 let config = null;          // {examDate, examLabel, milestones:[{id,title,date,progress}], keyDates:[{id,title,date}]}
@@ -614,10 +652,12 @@ function renderWeeklySection(){
     }
     const lvl = levelForHours(sum);
     const weekdayShort = ['日','一','二','三','四','五','六'][d.getDay()];
+    const moodEmoji = (e && e.mood) ? e.mood : '';
     dayGrid += `
       <div class="wk-day lvl-${lvl}" data-action="open-day" data-date="${ds}" title="${chineseMD(ds)} · ${sum.toFixed(1)} h">
         <div class="wk-day-w">${weekdayShort}</div>
         <div class="wk-day-d">${d.getDate()}</div>
+        <div class="wk-day-mood">${moodEmoji}</div>
         <div class="wk-day-h">${sum>0 ? sum.toFixed(1)+'h' : '—'}</div>
       </div>`;
   }
@@ -629,8 +669,12 @@ function renderWeeklySection(){
     : '—';
 
   const notesHtml = cur.noteList.length
-    ? '<div class="wk-notes"><div class="wk-notes-title">本周备注</div>' +
-        cur.noteList.map(n=>`<div class="wk-note"><span class="mono">${chineseMD(n.date)}</span> ${escapeHtml(n.note)}</div>`).join('') +
+    ? '<div class="wk-notes"><div class="wk-notes-title">本周记录</div>' +
+        cur.noteList.map(n => {
+          const e = heatmap[n.date];
+          const moodStr = (e && e.mood) ? e.mood + ' ' : '';
+          return `<div class="wk-note"><span class="mono">${chineseMD(n.date)}</span> ${moodStr}${escapeHtml(n.note)}</div>`;
+        }).join('') +
         '</div>'
     : '';
 
@@ -966,7 +1010,9 @@ function renderHeatmapGrid(){
       const total = dayTotal(ds);
       const lvl = levelForHours(total);
       const todayCls = ds === today ? 'is-today' : '';
-      const titleTxt = total>0 ? `${chineseMD(ds)} · 学习 ${total}h` : `${chineseMD(ds)} · 暂无记录`;
+      const e = heatmap[ds];
+      const moodStr = (e && e.mood) ? ' ' + e.mood : '';
+      const titleTxt = total>0 ? `${chineseMD(ds)} · 学习 ${total}h${moodStr}` : `${chineseMD(ds)} · 暂无记录${moodStr}`;
       html += `<div class="cell lvl-${lvl} ${todayCls}" data-action="open-day" data-date="${ds}" title="${titleTxt}"></div>`;
     }
   }
@@ -976,12 +1022,15 @@ function renderHeatmapGrid(){
 
 /* ============ day modal ============ */
 function renderDayModal(dateStr){
-  const entry = heatmap[dateStr] || {subjects:{}, note:''};
+  const entry = heatmap[dateStr] || {subjects:{}, note:'', mood:''};
   const fields = SUBJECTS.map(s => `
     <div class="subject-field">
       <label>${s.label}(小时)</label>
       <input type="number" min="0" step="0.5" id="day-${s.key}" value="${entry.subjects && entry.subjects[s.key] ? entry.subjects[s.key] : ''}" placeholder="0">
     </div>
+  `).join('');
+  const moodHtml = MOODS.map(m => `
+    <button class="mood-btn ${entry.mood===m.emoji ? 'active' : ''}" data-action="pick-mood" data-mood="${m.emoji}" title="${m.label}">${m.emoji}</button>
   `).join('');
   return `
     <div class="overlay" data-action="overlay-close" data-modal="day">
@@ -989,6 +1038,10 @@ function renderDayModal(dateStr){
         <h2>${chineseFull(dateStr)}</h2>
         <div class="sub">按科目记录今天的学习时长,留空表示 0</div>
         <div class="subject-grid">${fields}</div>
+        <div class="field" style="margin-top:14px;">
+          <label>今天的状态与心情</label>
+          <div class="mood-row">${moodHtml}</div>
+        </div>
         <div class="field" style="margin-top:14px;">
           <label>备注(可选)</label>
           <textarea id="day-note" rows="2" placeholder="今天的状态、卡住的地方…">${escapeHtml(entry.note||'')}</textarea>
@@ -1245,6 +1298,13 @@ function handleClick(e){
   if(action === 'log-today'){ openModal(renderDayModal(todayStr())); return; }
   if(action === 'open-day'){ openModal(renderDayModal(el.dataset.date)); return; }
 
+  if(action === 'pick-mood'){
+    const wasActive = el.classList.contains('active');
+    $all('.mood-btn').forEach(b => b.classList.remove('active'));
+    if(!wasActive) el.classList.add('active');
+    return;
+  }
+
   if(action === 'save-day'){
     const date = el.dataset.date;
     const subjects = {};
@@ -1253,10 +1313,12 @@ function handleClick(e){
       if(v && v>0) subjects[s.key] = v;
     });
     const note = $('#day-note').value.trim();
-    if(Object.keys(subjects).length===0 && !note){
+    const activeMood = document.querySelector('.mood-btn.active');
+    const mood = activeMood ? activeMood.dataset.mood : '';
+    if(Object.keys(subjects).length===0 && !note && !mood){
       delete heatmap[date];
     } else {
-      heatmap[date] = {subjects, note};
+      heatmap[date] = {subjects, note, mood};
     }
     saveHeatmap();
     closeModal();
